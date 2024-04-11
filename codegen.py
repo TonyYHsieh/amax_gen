@@ -404,12 +404,13 @@ class AMaxKernelGenerator:
         return mod
 
 
-    def max_per_data(self, i) -> ti.Module:
+    def max_per_data(self, i, numElement) -> ti.Module:
         mod = ti.Module("max_per_data")
         if (self.i_type.isHalf()):
             mod.add(ti.VMaxF16(ti.vgpr("Output"), ti.vgpr("Output"), ti.SrcAbs(ti.vgpr(f"Value+{i}"))))
-            mod.add(ti.VLShiftRightB32(ti.vgpr(f"Value+{i}"), 16, ti.vgpr(f"Value+{i}")))
-            mod.add(ti.VMaxF16(ti.vgpr("Output"), ti.vgpr("Output"), ti.SrcAbs(ti.vgpr(f"Value+{i}"))))
+            if numElement == 2:
+                mod.add(ti.VLShiftRightB32(ti.vgpr(f"Value+{i}"), 16, ti.vgpr(f"Value+{i}")))
+                mod.add(ti.VMaxF16(ti.vgpr("Output"), ti.vgpr("Output"), ti.SrcAbs(ti.vgpr(f"Value+{i}"))))
         elif (self.i_type.isSingle()):
             mod.add(ti.VMaxF32(ti.vgpr("Output"), ti.vgpr("Output"), ti.SrcAbs(ti.vgpr(f"Value+{i}"))))
         return mod
@@ -444,7 +445,7 @@ class AMaxKernelGenerator:
             for i in range(0, self.num_load_count): # unroll
                 mod.add(ti.SWaitCnt(vmcnt=(self.num_load_count-i-1)))
                 for j in range(0, self.num_load_size): # dwordx4
-                    mod.add(self.max_per_data(i * self.num_load_size + j))
+                    mod.add(self.max_per_data(i * self.num_load_size + j, 1 / self.i_type.numRegisters()))
             mod.addSpaceLine()
             # scale operation
             for i in range(0, self.num_load_count): # unroll
@@ -490,7 +491,7 @@ class AMaxKernelGenerator:
             mod.add(ti.SWaitCnt(vmcnt=0))
             # max operation
             for i in range(0, self.num_load_size): # dwordx4
-                mod.add(self.max_per_data(i))
+                mod.add(self.max_per_data(i, 1 / self.i_type.numRegisters()))
             mod.addSpaceLine()
             # scale operation
             for i in range(0, self.num_load_size): # dwordx4
@@ -552,7 +553,7 @@ class AMaxKernelGenerator:
             mod.add(BufferLoadx1(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.addSpaceLine()
-            mod.add(self.max_per_data(0))
+            mod.add(self.max_per_data(0, 1))
             mod.addSpaceLine()
             mod.add(self.scale_per_data(0))
             mod.addSpaceLine()
@@ -584,7 +585,7 @@ class AMaxKernelGenerator:
         mod.add(BufferLoadx1(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.addSpaceLine()
-        mod.add(self.max_per_data(0))
+        mod.add(self.max_per_data(0, 1))
         mod.addSpaceLine()
         mod.add(self.scale_per_data(0))
         mod.addSpaceLine()
@@ -805,8 +806,8 @@ def meta_str(kernels: Tuple[KernelMeta]):
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('-o', '--output', type=str, required=True, help='Output path of compiled binary')
-    ap.add_argument('-t', type=str, default="S", help='data type')
-    ap.add_argument('-d', type=str, default="None", help='dest data type')
+    ap.add_argument('-t', type=str, default="H", help='data type')
+    ap.add_argument('-d', type=str, default="S", help='dest data type')
     ap.add_argument('-s', type=str, default="F8", help='scale data type')
     ap.add_argument('-w', type=int, default=256, help='workitem')
     ap.add_argument('-c', type=int, default=4, help='load conut per iteration')
