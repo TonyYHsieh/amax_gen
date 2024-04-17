@@ -44,7 +44,7 @@ void cpuAMax(To *out, Ti *in, std::uint32_t length)
 }
 
 template<typename Ti, typename To>
-hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
+hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, To *wk, std::uint32_t* sync,  std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
 
     std::uint32_t workgroups = min((length + workSize - 1) / workSize, numGroups);
 //    std::uint32_t workgroups = (length + workSize -1) / workSize;
@@ -53,6 +53,8 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, std::uint32_t leng
     KernelArguments args;
     args.append(out);
     args.append(in);
+    args.append(wk);
+    args.append(sync);
     args.append(length);
     args.append(workSize);
     args.append(workgroups);
@@ -126,6 +128,14 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     err = hipMalloc(&gpuOutput, sizeof(To));
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
+    To *workspace{};
+    err = hipMalloc(&workspace, sizeof(To) * numGroups);
+    err = hipMemset(workspace, 0, sizeof(To) * numGroups);
+
+    std::uint32_t *sync{};
+    err = hipMalloc(&sync, sizeof(std::uint32_t));
+    err = hipMemset(sync, 0, sizeof(std::uint32_t));
+
     hipModule_t module{};
     hipFunction_t func{};
     int numRun = (1000000.0f * 16 * 1024 / float(length));
@@ -135,7 +145,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMax(func, gpuOutput, gpuInput, length, workSize, numGroups, numRun);
+    err = launchASMAMax(func, gpuOutput, gpuInput, workspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
@@ -147,13 +157,21 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     cpuAMax<Ti, To>(cpuRef.data(), cpuInput.data(), length);
     // dumpBuffer("CPU result", cpuRef, cpuRef.size());
 
+    std::vector<To> cpuWs(numGroups, 0.f);
+    err = hipMemcpyDtoH(cpuWs.data(), workspace, numGroups * sizeof(To));
+    // dumpBuffer("WS result", cpuWs, cpuWs.size());
+
+    std::vector<uint32_t> cpuSy(1, 0);
+    err = hipMemcpyDtoH(cpuSy.data(), sync, sizeof(uint32_t));
+    // dumpBuffer("Sy result", cpuSy, cpuSy.size());
+
+
     To error = 0.0;
     for (std::size_t i = 0; i < 1; ++i) {
         error = max(error, abs(cpuOutput[i]-cpuRef[i]));
     }
 
-    std::cout << "GPU " << float(cpuOutput[0]) << " CPU " << float(cpuRef[0]) << std::endl;
-    std::cout << "Tony max error : " << float(error) << std::endl;
+    std::cout << "Tony CPU " << cpuRef[0] << " GPU " << cpuOutput[0] << " max error : " << float(error) << std::endl;
 
     err = hipFree(gpuOutput);
     err = hipFree(gpuInput);
@@ -163,7 +181,11 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
 
 int main(int argc, char **argv) {
 
-    assert(argc == 8);
+    if (argc != 8)
+    {
+        std::cout << "amax amax.co H S [W] [H] [blockSize] [numGroups]" << std::endl;
+        return -1;
+    }
 
     const std::string coPath(argv[1]);
     const std::string inType(argv[2]);
@@ -174,11 +196,9 @@ int main(int argc, char **argv) {
     const std::uint32_t numGroups(std::atoi(argv[7]));
     const std::uint32_t length = m * n;
 
-    std::cout << "m " << m << " n " << n << std::endl;
+    std::cout << "inType " << inType << " outType " << outType << " m " << m << " n " << n << " workSize " << workSize << " numGroups " << numGroups << std::endl;
 
-    if (inType == "S" and outType == "S")
-        AMaxTest<float, float>(coPath, length, workSize, numGroups);
-    else if (inType == "H" and outType == "S")
+    if (inType == "H" and outType == "S")
         AMaxTest<_Float16, float>(coPath, length, workSize, numGroups);
     else
         std::cout << "unsupported type " << inType << " " << outType << std::endl;
