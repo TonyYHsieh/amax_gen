@@ -897,7 +897,7 @@ class AMaxKernelGenerator:
 
         BufferStorex1 = self.global_write_inst_type(1, self.i_type)
         mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
-        mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True, glc=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.addSpaceLine()
 

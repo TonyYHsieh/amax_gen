@@ -47,7 +47,6 @@ template<typename Ti, typename To>
 hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, To *wk, std::uint32_t* sync,  std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
 
     std::uint32_t workgroups = min((length + workSize - 1) / workSize, numGroups);
-//    std::uint32_t workgroups = (length + workSize -1) / workSize;
     std::cout << "workgroups " << workgroups << std::endl;
 
     KernelArguments args;
