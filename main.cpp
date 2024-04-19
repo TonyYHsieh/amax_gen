@@ -75,7 +75,7 @@ void cpuAMaxWithScale(To* out, Ts* outD, Ti* in, const float* in_scale, std::uin
 }
 
 template<typename Ti, typename To>
-hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, To *wk, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
+hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint32_t* sy, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
 
     std::uint32_t workgroups = min((length + workSize - 1) / workSize, numGroups);
     std::cout << "workgroups " << workgroups << std::endl;
@@ -84,6 +84,7 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, To *wk, std::uint3
     args.append(out);
     args.append(in);
     args.append(wk);
+    args.append(sy);
     args.append(length);
     args.append(workSize);
     args.append(workgroups);
@@ -121,7 +122,7 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, To *wk, std::uint3
 
 
 template<typename Ti, typename To, typename Ts>
-hipError_t launchASMAMaxScale(hipFunction_t func, To *out, Ti* in, float* scale, Ts* outD, To *wk, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
+hipError_t launchASMAMaxScale(hipFunction_t func, To *out, Ti* in, float* scale, Ts* outD, Ti *wk, std::uint32_t* sy, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
 
     std::uint32_t workgroups = 1; // min((length + workSize - 1) / workSize, numGroups);
     std::cout << "workgroups " << workgroups << std::endl;
@@ -192,9 +193,13 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     err = hipMalloc(&gpuOutput, sizeof(To));
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
-    To *workspace{};
-    err = hipMalloc(&workspace, sizeof(Ti) * numGroups + 4);
-    err = hipMemset(workspace, 0, sizeof(Ti) * numGroups + 4);
+    Ti *workspace{};
+    err = hipMalloc(&workspace, sizeof(Ti) * numGroups);
+    err = hipMemset(workspace, 0, sizeof(Ti) * numGroups);
+
+    std::uint32_t *sync{};
+    err = hipMalloc(&sync, sizeof(std::uint32_t));
+    err = hipMemset(sync, 0, sizeof(std::uint32_t));
 
     hipModule_t module{};
     hipFunction_t func{};
@@ -205,7 +210,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMax(func, gpuOutput, gpuInput, workspace, length, workSize, numGroups, numRun);
+    err = launchASMAMax(func, gpuOutput, gpuInput, workspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
@@ -251,9 +256,9 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     err = hipMalloc(&gpuOutput, sizeof(To));
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
-    To *workspace{};
-    err = hipMalloc(&workspace, sizeof(To) * numGroups);
-    err = hipMemset(workspace, 0, sizeof(To) * numGroups);
+    Ti *workspace{};
+    err = hipMalloc(&workspace, sizeof(Ti) * numGroups);
+    err = hipMemset(workspace, 0, sizeof(Ti) * numGroups);
 
     std::uint32_t *sync{};
     err = hipMalloc(&sync, sizeof(std::uint32_t));
@@ -277,7 +282,7 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMaxScale(func, gpuOutput, gpuInput, gpuScale, gpuOutputD, workspace, length, workSize, numGroups, numRun);
+    err = launchASMAMaxScale(func, gpuOutput, gpuInput, gpuScale, gpuOutputD, workspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
