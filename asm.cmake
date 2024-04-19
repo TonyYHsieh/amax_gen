@@ -10,11 +10,21 @@ function(build_asm f custom_target)
   )
 endfunction()
 
-function(gen_and_build_asm f custom_target)
+function(gen_and_build_amax f custom_target)
   add_custom_command(
     TARGET ${custom_target}
     PRE_BUILD
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/codegen.py -o ${CMAKE_CURRENT_BINARY_DIR}/${f}.s
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/codegen.py -o ${CMAKE_CURRENT_BINARY_DIR}/${f}.s -t H -d S --arch gfx942
     VERBATIM
   )
 endfunction()
+
+function(gen_and_build_amax_scale f custom_target)
+  add_custom_command(
+    TARGET ${custom_target}
+    PRE_BUILD
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/codegen.py --is-scale -o ${CMAKE_CURRENT_BINARY_DIR}/${f}.s -t S -d S -s F8 --arch gfx942
+    VERBATIM
+  )
+endfunction()
+
