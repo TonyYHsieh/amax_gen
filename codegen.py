@@ -285,11 +285,13 @@ class AMaxKernelGenerator:
                 self.defineVgpr("Fp8Max",    1, 1)
                 self.defineVgpr("Fp8Max", 1)
                 self.defineVgpr("Fp8Min", 1)
+                self.defineVgpr("Fp8Tmp", 1)
             elif self.scale_type == ti.DataType("B8"):
                 self.defineVgpr("BF8NanInf", 1, 1)
                 self.defineVgpr("BF8Max",    1, 1)
                 self.defineVgpr("BF8Max", 1)
                 self.defineVgpr("BF8Min", 1)
+                self.defineVgpr("BF8Tmp", 1)
 
         self.defineSgpr("KernelArg", 2)
         self.defineSgpr("WorkGroup0", 1)
@@ -336,6 +338,7 @@ class AMaxKernelGenerator:
     def load_kernel_args(self):
         mod = ti.Module('Load kernel args')
         mod.addComment0('Load kernel args')
+        offset = 0
         if self.is_scale:
             mod.add(ti.SLoadB64(ti.sgpr("AddressOut", 2),    ti.sgpr("KernelArg", 2),  0))
             mod.add(ti.SLoadB64(ti.sgpr("AddressOutD", 2),   ti.sgpr("KernelArg", 2),  8))
@@ -350,6 +353,7 @@ class AMaxKernelGenerator:
             mod.add(ti.SLoadB32(ti.sgpr("SizeLength"),       ti.sgpr("KernelArg", 2),  32))
             mod.add(ti.SLoadB32(ti.sgpr("WorkSize"),         ti.sgpr("KernelArg", 2),  36))
             mod.add(ti.SLoadB32(ti.sgpr("NumGroup"),         ti.sgpr("KernelArg", 2),  40))
+
         mod.add(ti.SWaitCnt(lgkmcnt=0))
         mod.addSpaceLine()
 
