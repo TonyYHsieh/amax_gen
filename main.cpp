@@ -120,19 +120,22 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
     return err;
 }
 
-
 template<typename Ti, typename To, typename Ts>
-hipError_t launchASMAMaxScale(hipFunction_t func, To *out, Ti* in, float* scale, Ts* outD, Ti *wk, std::uint32_t* sy, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
+hipError_t launchASMAMaxScale(hipFunction_t func, To *out, Ts* outD, Ti* in, float* scale, Ti *wk, std::uint32_t* sy, std::uint32_t length, std::uint32_t workSize, std::uint32_t numGroups, std::uint32_t numRuns) {
 
-    std::uint32_t workgroups = 1; // min((length + workSize - 1) / workSize, numGroups);
+    std::uint32_t workgroups = min((length + workSize - 1) / workSize, numGroups);
     std::cout << "workgroups " << workgroups << std::endl;
 
     KernelArguments args;
     args.append(out);
-    args.append(outD);
+    args.append(outD); // scale result
     args.append(in);
-    args.append(scale);
+    args.append(scale); // scale input
+    args.append(wk);
+    args.append(sy);
     args.append(length);
+    args.append(workSize);
+    args.append(workgroups);
     args.applyAlignment();
     std::size_t argsSize = args.size();
     void *launchArgs[] = {
@@ -282,7 +285,7 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMaxScale(func, gpuOutput, gpuInput, gpuScale, gpuOutputD, workspace, sync, length, workSize, numGroups, numRun);
+    err = launchASMAMaxScale(func, gpuOutput, gpuOutputD, gpuInput, gpuScale, workspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
@@ -290,11 +293,9 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     err = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, sizeof(To));
     // dumpBuffer("GPU result", cpuOutput, cpuOutput.size());
 
-    std::vector<To> cpuRef(1, 0.f);
-    std::vector<Ts> cpuRefOutD(length);
-    cpuAMaxWithScale<Ti, To, Ts>(cpuRef.data(), cpuRefOutD.data(), cpuInput.data(), &scale, length);
-    //cpuAMaxScale<Ti, To>(cpuRef.data(), cpuInput.data(), length);
-    // dumpBuffer("cpuRefOutD", cpuRefOutD);
+    std::vector<Ts> cpuOutD(length);
+    err = hipMemcpyDtoH(cpuOutD.data(), gpuOutputD, length * sizeof(Ts));
+    // dumpBuffer("cpuOutD", cpuOutD);
 
     std::vector<To> cpuWs(numGroups, 0.f);
     err = hipMemcpyDtoH(cpuWs.data(), workspace, numGroups * sizeof(To));
@@ -304,9 +305,10 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     err = hipMemcpyDtoH(cpusy.data(), sync, sizeof(uint32_t));
     // dumpBuffer("sy result", cpusy, cpusy.size());
 
-    std::vector<Ts> cpuOutD(length);
-    err = hipMemcpyDtoH(cpuOutD.data(), gpuOutputD, length * sizeof(Ts));
-    // dumpBuffer("cpuOutD", cpuOutD);
+    std::vector<To> cpuRef(1, 0.f);
+    std::vector<Ts> cpuRefOutD(length);
+    cpuAMaxWithScale<Ti, To, Ts>(cpuRef.data(), cpuRefOutD.data(), cpuInput.data(), &scale, length);
+    // dumpBuffer("cpuRefOutD", cpuRefOutD);
 
     To error = 0.0;
     for (std::size_t i = 0; i < 1; ++i) {
@@ -349,8 +351,10 @@ int main(int argc, char **argv) {
 
     std::cout << " m " << m << " n " << n << std::endl;
 
-//    AMaxScaleTest<float, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 65536, 128);
-    AMaxTest<_Float16, float>("amax.co", length, 131072, 128);
+    if (is_scale)
+        AMaxScaleTest<float, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 131072, 128);
+    else
+        AMaxTest<_Float16, float>("amax.co", length, 131072, 128);
 
     return 0;
 }
