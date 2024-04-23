@@ -14,7 +14,7 @@ function(gen_and_build_amax f custom_target)
   add_custom_command(
     TARGET ${custom_target}
     PRE_BUILD
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/codegen.py -o ${CMAKE_CURRENT_BINARY_DIR}/${f}.s -t H -d S --arch gfx942
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/codegen.py -o ${CMAKE_CURRENT_BINARY_DIR}/${f}.s -t S -d S --arch gfx942
     VERBATIM
   )
 endfunction()

@@ -147,7 +147,7 @@ class AMaxKernelGenerator:
 
     @property
     def func_name(self):
-        if is_scale:
+        if self.is_scale:
             return 'AMax_Scale'
         else:
             return 'AMax'

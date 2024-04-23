@@ -89,6 +89,7 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
     args.append(workSize);
     args.append(workgroups);
     args.applyAlignment();
+
     std::size_t argsSize = args.size();
     void *launchArgs[] = {
         HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -354,7 +355,7 @@ int main(int argc, char **argv) {
     if (is_scale)
         AMaxScaleTest<float, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 131072, 128);
     else
-        AMaxTest<_Float16, float>("amax.co", length, 131072, 128);
+        AMaxTest<float, float>("amax.co", length, 131072, 128);
 
     return 0;
 }
