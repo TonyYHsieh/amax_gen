@@ -107,7 +107,6 @@ class AMaxKernelGenerator:
                  wave_size: int,
                  num_load_count: int,
                  num_load_size: int,
-                 block_size: int,
                  arch: str,
                  is_scale: bool):
         self.i_type = i_type
@@ -115,7 +114,6 @@ class AMaxKernelGenerator:
         self.scale_type = scale_type
         self.bpe = i_type.numBytes()
         self.bpr = i_type.numRegisters()
-        self.block_size = block_size
         self.max_workgoups = num_workitems
         self.num_workitems = num_workitems
         self.wave_size = wave_size
@@ -404,6 +402,7 @@ class AMaxKernelGenerator:
         mod.addSpaceLine()
 
         mod.add(ti.VMovB32(ti.vgpr("Output"), 0))
+        mod.add(ti.SMovB32(ti.sgpr("WGIdx"),ti.sgpr("WorkGroup0")))
         mod.addSpaceLine()
 
         if self.is_scale: # init inputScale
@@ -514,7 +513,6 @@ class AMaxKernelGenerator:
         label_sum_per_blocksize_end = ti.Label("sum_per_blocksize_end", 'sum_per_blocksize_end')
 
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), ti.sgpr("LogWorkSize"), ti.sgpr("SizeLength")))
-        mod.add(ti.SMovB32(ti.sgpr("WGIdx"),ti.sgpr("WorkGroup0")))
         mod.add(label_sum_per_blocksize)
         mod.add(ti.SCmpGeI32(ti.sgpr("WGIdx"), ti.sgpr("MainLoop")))
         mod.add(ti.SCBranchSCC1(label_sum_per_blocksize_end.getLabelName()))
@@ -1153,7 +1151,6 @@ if __name__ == '__main__':
     num_workitem: int = 256
     wave_size: int = 64
     c: int = 8
-    blockSize: int = 131072
     toolchain_path: str = args.toolchain
     debug_build: bool = args.debug_build
     arch: str = args.arch
@@ -1169,7 +1166,7 @@ if __name__ == '__main__':
         toolchain_path = globalParameters['AssemblerPath']
 
     ti.Base._global_ti.init(isa, toolchain_path, False)
-    amax = AMaxKernelGenerator(ti.DataType(t), ti.DataType(d), ti.DataType(s), num_workitem, wave_size, c, int(4 / ti.DataType(t).numRegisters()), blockSize, arch, is_scale)
+    amax = AMaxKernelGenerator(ti.DataType(t), ti.DataType(d), ti.DataType(s), num_workitem, wave_size, c, int(4 / ti.DataType(t).numRegisters()), arch, is_scale)
     kernel_body = amax.amax_kernel_body()
     args = amax.kernel_args()
     func_name = amax.func_name
