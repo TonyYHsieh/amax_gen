@@ -146,9 +146,8 @@ class AMaxKernelGenerator:
     @property
     def func_name(self):
         if self.is_scale:
-            return 'AMax_Scale'
-        else:
-            return 'AMax'
+            return f'AMax_Ti_{self.i_type}_To_{self.o_type}_Ts_{self.scale_type}'
+        return f'AMax_Ti_{self.i_type}_To_{self.o_type}'
 
     def dumps(self, format: str) -> str:
         param_dict = {
@@ -270,14 +269,18 @@ class AMaxKernelGenerator:
                     KernelArgument(8, 40, 'global_buffer', 'global'),
                     KernelArgument(4, 48, 'by_value'),
                     KernelArgument(4, 52, 'by_value'),
-                    KernelArgument(4, 56, 'by_value'))
+                    KernelArgument(4, 56, 'by_value'),
+                    KernelArgument(4, 60, 'by_value'),
+                    KernelArgument(4, 64, 'by_value'))
         return (KernelArgument(8,  0, 'global_buffer', 'global'),
                 KernelArgument(8,  8, 'global_buffer', 'global'),
                 KernelArgument(8, 16, 'global_buffer', 'global'),
                 KernelArgument(8, 24, 'global_buffer', 'global'),
                 KernelArgument(4, 32, 'by_value'),
                 KernelArgument(4, 36, 'by_value'),
-                KernelArgument(4, 40, 'by_value'))
+                KernelArgument(4, 40, 'by_value'),
+                KernelArgument(4, 44, 'by_value'),
+                KernelArgument(4, 48, 'by_value'))
 
 
     def defineVariables(self):
@@ -317,6 +320,8 @@ class AMaxKernelGenerator:
         self.defineSgpr("AddressWk",  2, 2)
         self.defineSgpr("AddressSy",  2, 2)
         self.defineSgpr("SizeLength", 1)
+        self.defineSgpr("IsDivided", 1)
+        self.defineSgpr("Divided", 1)
         self.defineSgpr("WorkSize",   1)
         self.defineSgpr("NumGroup",   1)
 
@@ -360,22 +365,27 @@ class AMaxKernelGenerator:
             mod.add(ti.SLoadB64(ti.sgpr("AddressWk", 2),     ti.sgpr("KernelArg", 2),  32))
             mod.add(ti.SLoadB64(ti.sgpr("AddressSy", 2),     ti.sgpr("KernelArg", 2),  40))
             mod.add(ti.SLoadB32(ti.sgpr("SizeLength"),       ti.sgpr("KernelArg", 2),  48))
-            mod.add(ti.SLoadB32(ti.sgpr("WorkSize"),         ti.sgpr("KernelArg", 2),  52))
-            mod.add(ti.SLoadB32(ti.sgpr("NumGroup"),         ti.sgpr("KernelArg", 2),  56))
+            mod.add(ti.SLoadB32(ti.sgpr("IsDivided"),        ti.sgpr("KernelArg", 2),  52))
+            mod.add(ti.SLoadB32(ti.sgpr("Divided"),          ti.sgpr("KernelArg", 2),  56))
+            mod.add(ti.SLoadB32(ti.sgpr("WorkSize"),         ti.sgpr("KernelArg", 2),  60))
+            mod.add(ti.SLoadB32(ti.sgpr("NumGroup"),         ti.sgpr("KernelArg", 2),  64))
         else:
             mod.add(ti.SLoadB64(ti.sgpr("AddressOut", 2),    ti.sgpr("KernelArg", 2),   0))
             mod.add(ti.SLoadB64(ti.sgpr("AddressIn", 2),     ti.sgpr("KernelArg", 2),   8))
             mod.add(ti.SLoadB64(ti.sgpr("AddressWk", 2),     ti.sgpr("KernelArg", 2),  16))
             mod.add(ti.SLoadB64(ti.sgpr("AddressSy", 2),     ti.sgpr("KernelArg", 2),  24))
             mod.add(ti.SLoadB32(ti.sgpr("SizeLength"),       ti.sgpr("KernelArg", 2),  32))
-            mod.add(ti.SLoadB32(ti.sgpr("WorkSize"),         ti.sgpr("KernelArg", 2),  36))
-            mod.add(ti.SLoadB32(ti.sgpr("NumGroup"),         ti.sgpr("KernelArg", 2),  40))
+            mod.add(ti.SLoadB32(ti.sgpr("IsDivided"),        ti.sgpr("KernelArg", 2),  36))
+            mod.add(ti.SLoadB32(ti.sgpr("Divided"),          ti.sgpr("KernelArg", 2),  40))
+            mod.add(ti.SLoadB32(ti.sgpr("WorkSize"),         ti.sgpr("KernelArg", 2),  44))
+            mod.add(ti.SLoadB32(ti.sgpr("NumGroup"),         ti.sgpr("KernelArg", 2),  48))
 
         mod.add(ti.SWaitCnt(lgkmcnt=0))
         mod.addSpaceLine()
 
         mod.add(ti.VMovB32(ti.vgpr("Tmp"), ti.sgpr("WorkSize")))
         mod.add(ti.VCvtU32toF32(ti.vgpr("Tmp"), ti.vgpr("Tmp")))
+        mod.add(ti.SNop(0))
         mod.add(ti.VLogF32(ti.vgpr("Tmp"), ti.vgpr("Tmp")))
         mod.add(ti.SNop(0))
         mod.add(ti.VCvtF32toU32(ti.vgpr("Tmp"), ti.vgpr("Tmp")))
@@ -952,6 +962,8 @@ class AMaxKernelGenerator:
         mod = ti.Module("output_result")
         mod.addComment0("output_result")
 
+        label_break = ti.Label("break", 'break')
+        label_break2 = ti.Label("break2", 'break2')
         label_end = ti.Label("end", 'end')
         label_final_loop = ti.Label("final_loop", 'final_loop')
         label_final_output = ti.Label("final_output", 'final_output')
@@ -962,65 +974,69 @@ class AMaxKernelGenerator:
         mod.add(ti.SCBranchSCC0(label_end.getLabelName()))
         mod.addSpaceLine()
 
-        mod.add(ti.SCmpEQU32(ti.sgpr("NumGroup"), 1))
-        mod.add(ti.SCBranchSCC1(label_final_output.getLabelName()))
+        if self.arch.find("gfx94") != -1:
+            mod.addSpaceLine()
+            mod.add(ti.SCmpEQU32(ti.sgpr("NumGroup"), 1))
+            mod.add(ti.SCBranchSCC1(label_final_output.getLabelName()))
 
-        mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp+0"), int(log2(self.i_type.numBytes())), ti.sgpr("WorkGroup0")))
-        mod.add(ti.SMovB32(ti.sgpr("Dst+0"), ti.sgpr("AddressWk+0")))
-        mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressWk+1")))
-        mod.add(ti.SAddU32(ti.sgpr("Dst+0"), ti.sgpr("Dst+0"), ti.sgpr("Tmp+0")))
-        mod.add(ti.SAddCU32(ti.sgpr("Dst+1"), ti.sgpr("Dst+1"), 0x0))
-        mod.add(ti.SMovB32(ti.sgpr("Dst+2"), self.i_type.numBytes()))
-        mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
+            mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp+0"), int(log2(self.i_type.numBytes())), ti.sgpr("WorkGroup0")))
+            mod.add(ti.SMovB32(ti.sgpr("Dst+0"), ti.sgpr("AddressWk+0")))
+            mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressWk+1")))
+            mod.add(ti.SAddU32(ti.sgpr("Dst+0"), ti.sgpr("Dst+0"), ti.sgpr("Tmp+0")))
+            mod.add(ti.SAddCU32(ti.sgpr("Dst+1"), ti.sgpr("Dst+1"), 0x0))
+            mod.add(ti.SMovB32(ti.sgpr("Dst+2"), self.i_type.numBytes()))
+            mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
 
-        BufferStorex1 = self.global_write_inst_type(1, self.i_type)
-        mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
-        mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True, glc=True)))
-        mod.add(ti.SWaitCnt(vmcnt=0))
-        mod.addSpaceLine()
+            BufferStorex1 = self.global_write_inst_type(1, self.i_type)
+            mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
+            mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True, glc=True)))
+            mod.add(ti.SWaitCnt(vmcnt=0))
+            mod.addSpaceLine()
 
-        mod.add(ti.SSubI32(ti.sgpr("Tmp"), ti.sgpr("NumGroup"), 1))
-        mod.add(ti.SAtomicDec(ti.sgpr("Tmp"), ti.sgpr("AddressSy",2), 0, ti.SMEMModifiers(glc=True)))
-        mod.add(ti.SWaitCnt(vmcnt=0, lgkmcnt=0))
-        mod.add(ti.SCmpEQU32(ti.sgpr("Tmp"), 1))
-        mod.add(ti.SCBranchSCC0(label_end.getLabelName()))
-        mod.addSpaceLine()
+            mod.add(ti.SSubI32(ti.sgpr("Tmp"), ti.sgpr("NumGroup"), 1))
+            mod.add(ti.SAtomicDec(ti.sgpr("Tmp"), ti.sgpr("AddressSy",2), ti.SMEMModifiers(glc=True)))
+            mod.add(ti.SWaitCnt(vmcnt=0, lgkmcnt=0))
+            mod.add(ti.SCmpEQU32(ti.sgpr("Tmp"), 1))
+            mod.add(ti.SCBranchSCC0(label_end.getLabelName()))
+            mod.addSpaceLine()
 
-        mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), int(log2(self.i_type.numBytes())), ti.sgpr("NumGroup")))
-        mod.add(ti.SMovB32(ti.sgpr("Src+0"), ti.sgpr("AddressWk+0")))
-        mod.add(ti.SMovB32(ti.sgpr("Src+1"), ti.sgpr("AddressWk+1")))
-        mod.add(ti.SMovB32(ti.sgpr("Src+2"), ti.sgpr("Tmp")))
-        mod.add(ti.SMovB32(ti.sgpr("Src+3"), "Srd127_96"))
-        mod.addSpaceLine()
+            mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), int(log2(self.i_type.numBytes())), ti.sgpr("NumGroup")))
+            mod.add(ti.SMovB32(ti.sgpr("Src+0"), ti.sgpr("AddressWk+0")))
+            mod.add(ti.SMovB32(ti.sgpr("Src+1"), ti.sgpr("AddressWk+1")))
+            mod.add(ti.SMovB32(ti.sgpr("Src+2"), ti.sgpr("Tmp")))
+            mod.add(ti.SMovB32(ti.sgpr("Src+3"), "Srd127_96"))
+            mod.addSpaceLine()
 
-        mod.add(ti.VLShiftLeftB32(ti.vgpr("Offset"), int(log2(self.bpe)), ti.vgpr("Serial")))
-        mod.addSpaceLine()
+            mod.add(ti.VLShiftLeftB32(ti.vgpr("Offset"), int(log2(self.bpe)), ti.vgpr("Serial")))
+            mod.addSpaceLine()
 
-        mod.add(ti.VMovB32(ti.vgpr("Output"), "0"))
-        mod.addSpaceLine()
+            mod.add(ti.VMovB32(ti.vgpr("Output"), "0"))
+            mod.addSpaceLine()
 
-        mod.add(label_final_loop)
-        BufferLoadx1 = self.global_read_inst_type(1, self.i_type)
-        mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, offset12=int(0))))
-        mod.add(ti.SWaitCnt(vmcnt=0))
-        mod.addSpaceLine()
+            mod.add(label_final_loop)
+            BufferLoadx1 = self.global_read_inst_type(1, self.i_type)
+            mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, offset12=int(0))))
+            mod.add(ti.SWaitCnt(vmcnt=0))
+            mod.addSpaceLine()
 
-        mod.add(self.max_per_data(0, 1))
-        mod.addSpaceLine()
+            mod.add(label_break)
 
-        mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.wave_size * self.i_type.numBytes()))
-        mod.add(ti.VAddU32(ti.vgpr("Offset"), ti.vgpr("Offset"), ti.sgpr("Tmp")))
-        mod.addSpaceLine()
+            mod.add(self.max_per_data(0, 1))
+            mod.addSpaceLine()
 
-        mod.add(ti.SSubI32(ti.sgpr("NumGroup"), ti.sgpr("NumGroup"), self.wave_size))
-        mod.add(ti.SCmpGtI32(ti.sgpr("NumGroup"), 0))
-        mod.add(ti.SCBranchSCC1(label_final_loop.getLabelName()))
-        mod.addSpaceLine()
+            mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.wave_size * self.i_type.numBytes()))
+            mod.add(ti.VAddU32(ti.vgpr("Offset"), ti.vgpr("Offset"), ti.sgpr("Tmp")))
+            mod.addSpaceLine()
 
-        mod.add(self.intra_wave_reduction("final"))
-        mod.addSpaceLine()
+            mod.add(ti.SSubI32(ti.sgpr("NumGroup"), ti.sgpr("NumGroup"), self.wave_size))
+            mod.add(ti.SCmpGtI32(ti.sgpr("NumGroup"), 0))
+            mod.add(ti.SCBranchSCC1(label_final_loop.getLabelName()))
+            mod.addSpaceLine()
 
-        mod.add(label_final_output)
+            mod.add(self.intra_wave_reduction("final"))
+            mod.addSpaceLine()
+
+            mod.add(label_final_output)
 
         mod.add(ti.SMovB32(ti.sgpr("Dst+0"), ti.sgpr("AddressOut+0")))
         mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressOut+1")))
@@ -1028,13 +1044,34 @@ class AMaxKernelGenerator:
         mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
         mod.addSpaceLine()
 
-        BufferStorex1 = self.global_write_inst_type(1, self.o_type)
+        mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
 
+        BufferStorex1 = self.global_write_inst_type(1, self.o_type)
         if self.i_type.toChar() == 'H' and self.o_type.toChar() == "S":
             mod.add(ti.VCvtF16toF32(ti.vgpr("Output"), ti.vgpr("Output")))
         elif self.i_type.toChar() == 'S' and self.o_type.toChar() == "H":
             mod.add(ti.VCvtF32toF16(ti.vgpr("Output"), ti.vgpr("Output")))
-        mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
+        mod.add(ti.SNop(1))
+
+        label_divided = ti.Label("divided", 'divided')
+        mod.add(ti.SCmpEQI32(ti.sgpr("IsDivided"), 0))
+        mod.add(ti.SCBranchSCC1(label_divided.getLabelName()))
+
+        if self.o_type.toChar() == "S":
+            mod.add(ti.VRcpF32(ti.vgpr("Output"), ti.vgpr("Output")))
+            mod.add(ti.SNop(1))
+            mod.add(ti.VMulF32(ti.vgpr("Output"), ti.vgpr("Output"), ti.sgpr("Divided")))
+        elif self.o_type.toChar() == "H":
+            mod.add(ti.VCvtF32toF16(ti.vgpr("Output"), ti.vgpr("Output")))
+            mod.add(ti.SNop(1))
+            mod.add(ti.VRcpF32(ti.vgpr("Output"), ti.vgpr("Output")))
+            mod.add(ti.SNop(1))
+            mod.add(ti.VMulF32(ti.vgpr("Output"), ti.vgpr("Output"), ti.sgpr("Divided")))
+            mod.add(ti.SNop(1))
+            mod.add(ti.VCvtF16toF32(ti.vgpr("Output"), ti.vgpr("Output")))
+            mod.add(ti.SNop(1))
+        mod.add(label_divided)
+
         mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 
@@ -1185,8 +1222,6 @@ if __name__ == '__main__':
         build_args = ['-x', 'assembler', '-target', 'amdgcn-amd-amdhsa', '-mcode-object-version=4', f'-mcpu={arch}', '-mwavefrontsize64', '-c', '-o', f'{output_path_basename}.o', f'{output_path_basename}.s']
 
     ret = subprocess.run([toolchain_path] + build_args)
-    print([toolchain_path] + build_args)
     ret = subprocess.run([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
-    print([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
     amax.dump('yaml', f'{output_path_basename}.yaml')
 
