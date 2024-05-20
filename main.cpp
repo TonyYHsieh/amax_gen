@@ -86,6 +86,8 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
     args.append(wk);
     args.append(sy);
     args.append(length);
+    args.append(0);
+    args.append(240);
     args.append(workSize);
     args.append(workgroups);
     args.applyAlignment();
@@ -99,25 +101,30 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
         HIP_LAUNCH_PARAM_END
     };
 
+    hipStream_t stream{};
+    auto err = hipStreamCreate(&stream);
+
     hipEvent_t beg, end;
-    auto err = hipEventCreate(&beg);
+    err = hipEventCreate(&beg);
     err = hipEventCreate(&end);
 
-    for (size_t i = 0; i < numRuns; ++i) {
-        err = hipExtModuleLaunchKernel(func, 256 * workgroups, 1, 1, 256, 1, 1, 1000 * sizeof(float), nullptr, nullptr, launchArgs);
-    }
+//    for (size_t i = 0; i < numRuns; ++i) {
+//        err = hipExtModuleLaunchKernel(func, 256 * workgroups, 1, 1, 256, 1, 1, 1000 * sizeof(float), nullptr, nullptr, launchArgs);
+//    }
 
-    err = hipEventRecord(beg);
+    err = hipEventRecord(beg, stream);
     for (size_t i = 0; i < numRuns; ++i) {
         err = hipExtModuleLaunchKernel(func, 256 * workgroups, 1, 1, 256, 1, 1, 1000 * sizeof(float), nullptr, nullptr, launchArgs);
     }
-    err = hipEventRecord(end);
+    err = hipEventRecord(end, stream);
     err = hipEventSynchronize(end);
-    err = hipDeviceSynchronize();
+    err = hipStreamSynchronize(stream);
 
-    float dur{};
-    err = hipEventElapsedTime(&dur, beg, end);
-    std::cout << "ASM kernel time: " << std::to_string(dur / numRuns * 1000) << " us\n";
+    err = hipStreamDestroy(stream);
+    
+//    float dur{};
+//    err = hipEventElapsedTime(&dur, beg, end);
+//    std::cout << "ASM kernel time: " << std::to_string(dur / numRuns * 1000) << " us\n";
     return err;
 }
 
@@ -186,7 +193,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     hipDevice_t dev{};
     auto err = hipDeviceGet(&dev, 0);
 
-    std::vector<Ti> cpuWorkspace(length, Ti(2.0f));
+    std::vector<Ti> cpuWorkspace(4096, Ti(2.0f));
     std::vector<Ti> cpuInput(length, Ti(0.5f));
 //    randomize(begin(cpuInput), end(cpuInput));
 
@@ -199,9 +206,9 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
     Ti *gpuWorkspace{};
-    err = hipMalloc(&gpuWorkspace, sizeof(Ti) * numGroups);
+    err = hipMalloc(&gpuWorkspace, 4096);
 //    err = hipMemset(gpuWorkspace, 0, sizeof(Ti) * numGroups);
-    err = hipMemcpyHtoD(gpuWorkspace, cpuWorkspace.data(), cpuWorkspace.size() * sizeof(Ti));
+    err = hipMemcpyHtoD(gpuWorkspace, cpuWorkspace.data(), 4096);
 
     std::uint32_t *sync{};
     err = hipMalloc(&sync, sizeof(std::uint32_t));

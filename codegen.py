@@ -980,17 +980,17 @@ class AMaxKernelGenerator:
             mod.add(ti.SCmpEQU32(ti.sgpr("NumGroup"), 1))
             mod.add(ti.SCBranchSCC1(label_final_output.getLabelName()))
 
-            mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp+0"), int(log2(self.i_type.numBytes())), ti.sgpr("WorkGroup0")))
+            mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp+0"), int(log2(self.i_type.numBytes())), ti.sgpr("NumGroup")))
             mod.add(ti.SMovB32(ti.sgpr("Dst+0"), ti.sgpr("AddressWk+0")))
             mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressWk+1")))
-            mod.add(ti.SAddU32(ti.sgpr("Dst+0"), ti.sgpr("Dst+0"), ti.sgpr("Tmp+0")))
-            mod.add(ti.SAddCU32(ti.sgpr("Dst+1"), ti.sgpr("Dst+1"), 0x0))
-            mod.add(ti.SMovB32(ti.sgpr("Dst+2"), self.i_type.numBytes()))
+            mod.add(ti.SMovB32(ti.sgpr("Dst+2"), ti.sgpr("Tmp+0")))
             mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
 
-            BufferStorex1 = self.global_write_inst_type(1, self.i_type)
+            mod.add(ti.SLShiftLeftB32(ti.sgpr("Offset"), int(log2(self.i_type.numBytes())), ti.sgpr("WorkGroup0")))
             mod.add(ti.VMovB32(ti.vgpr("Offset"), 0))
-            mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True, glc=True)))
+
+            BufferStorex1 = self.global_write_inst_type(1, self.i_type)
+            mod.add(BufferStorex1(ti.vgpr("Output"), ti.vgpr("Offset"), ti.sgpr("Dst",4), ti.sgpr("Offset"), ti.MUBUFModifiers(offen=True, glc=True, slc=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.addSpaceLine()
 
@@ -1016,7 +1016,7 @@ class AMaxKernelGenerator:
 
             mod.add(label_final_loop)
             BufferLoadx1 = self.global_read_inst_type(1, self.i_type)
-            mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, offset12=int(0))))
+            mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, glc=True, slc=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.addSpaceLine()
 
