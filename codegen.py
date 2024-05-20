@@ -146,8 +146,9 @@ class AMaxKernelGenerator:
     @property
     def func_name(self):
         if self.is_scale:
-            return f'AMax_Ti_{self.i_type}_To_{self.o_type}_Ts_{self.scale_type}'
-        return f'AMax_Ti_{self.i_type}_To_{self.o_type}'
+            return 'AMax_Scale'
+        else:
+            return 'AMax'
 
     def dumps(self, format: str) -> str:
         param_dict = {
