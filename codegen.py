@@ -1001,20 +1001,18 @@ class AMaxKernelGenerator:
 
         mod.add(label_final_loop)
         BufferLoadx1 = self.global_read_inst_type(1, self.i_type)
-        for i in range(0, 4):
-            mod.add(BufferLoadx1(ti.vgpr(f"Value+{i}"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, offset12=int(self.wave_size * self.i_type.numBytes() * i))))
+        mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, offset12=int(0))))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.addSpaceLine()
 
-        for i in range(0, 4):
-            mod.add(self.max_per_data(i, 1))
+        mod.add(self.max_per_data(0, 1))
         mod.addSpaceLine()
 
-        mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.wave_size * self.i_type.numBytes() * 4))
+        mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.wave_size * self.i_type.numBytes()))
         mod.add(ti.VAddU32(ti.vgpr("Offset"), ti.vgpr("Offset"), ti.sgpr("Tmp")))
         mod.addSpaceLine()
 
-        mod.add(ti.SSubI32(ti.sgpr("NumGroup"), ti.sgpr("NumGroup"), 256))
+        mod.add(ti.SSubI32(ti.sgpr("NumGroup"), ti.sgpr("NumGroup"), self.wave_size))
         mod.add(ti.SCmpGtI32(ti.sgpr("NumGroup"), 0))
         mod.add(ti.SCBranchSCC1(label_final_loop.getLabelName()))
         mod.addSpaceLine()
@@ -1187,6 +1185,8 @@ if __name__ == '__main__':
         build_args = ['-x', 'assembler', '-target', 'amdgcn-amd-amdhsa', '-mcode-object-version=4', f'-mcpu={arch}', '-mwavefrontsize64', '-c', '-o', f'{output_path_basename}.o', f'{output_path_basename}.s']
 
     ret = subprocess.run([toolchain_path] + build_args)
+    print([toolchain_path] + build_args)
     ret = subprocess.run([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
+    print([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
     amax.dump('yaml', f'{output_path_basename}.yaml')
 

@@ -186,8 +186,9 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     hipDevice_t dev{};
     auto err = hipDeviceGet(&dev, 0);
 
-    std::vector<Ti> cpuInput(length, 0);
-    randomize(begin(cpuInput), end(cpuInput));
+    std::vector<Ti> cpuWorkspace(length, Ti(2.0f));
+    std::vector<Ti> cpuInput(length, Ti(0.5f));
+//    randomize(begin(cpuInput), end(cpuInput));
 
     Ti *gpuInput{};
     err = hipMalloc(&gpuInput, sizeof(Ti) * length);
@@ -197,9 +198,10 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     err = hipMalloc(&gpuOutput, sizeof(To));
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
-    Ti *workspace{};
-    err = hipMalloc(&workspace, sizeof(Ti) * numGroups);
-    err = hipMemset(workspace, 0, sizeof(Ti) * numGroups);
+    Ti *gpuWorkspace{};
+    err = hipMalloc(&gpuWorkspace, sizeof(Ti) * numGroups);
+//    err = hipMemset(gpuWorkspace, 0, sizeof(Ti) * numGroups);
+    err = hipMemcpyHtoD(gpuWorkspace, cpuWorkspace.data(), cpuWorkspace.size() * sizeof(Ti));
 
     std::uint32_t *sync{};
     err = hipMalloc(&sync, sizeof(std::uint32_t));
@@ -214,7 +216,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMax(func, gpuOutput, gpuInput, workspace, sync, length, workSize, numGroups, numRun);
+    err = launchASMAMax(func, gpuOutput, gpuInput, gpuWorkspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
@@ -227,7 +229,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     // dumpBuffer("CPU result", cpuRef, cpuRef.size());
 
     std::vector<To> cpuWs(numGroups, 0.f);
-    err = hipMemcpyDtoH(cpuWs.data(), workspace, numGroups * sizeof(To));
+    err = hipMemcpyDtoH(cpuWs.data(), gpuWorkspace, numGroups * sizeof(To));
     // dumpBuffer("WS result", cpuWs, cpuWs.size());
 
     To error = 0.0;
@@ -238,7 +240,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
 
     err = hipFree(gpuOutput);
     err = hipFree(gpuInput);
-    err = hipFree(workspace);
+    err = hipFree(gpuWorkspace);
     err = hipModuleUnload(module);
 }
 
@@ -260,9 +262,9 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     err = hipMalloc(&gpuOutput, sizeof(To));
     err = hipMemset(gpuOutput, 0, sizeof(To));
 
-    Ti *workspace{};
-    err = hipMalloc(&workspace, sizeof(Ti) * numGroups);
-    err = hipMemset(workspace, 0, sizeof(Ti) * numGroups);
+    Ti *gpuWorkspace{};
+    err = hipMalloc(&gpuWorkspace, sizeof(Ti) * numGroups);
+    err = hipMemset(gpuWorkspace, 0, sizeof(Ti) * numGroups);
 
     std::uint32_t *sync{};
     err = hipMalloc(&sync, sizeof(std::uint32_t));
@@ -286,7 +288,7 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     if (err)
         std::cout << "find asm kernel failed" << std::endl;
 
-    err = launchASMAMaxScale(func, gpuOutput, gpuOutputD, gpuInput, gpuScale, workspace, sync, length, workSize, numGroups, numRun);
+    err = launchASMAMaxScale(func, gpuOutput, gpuOutputD, gpuInput, gpuScale, gpuWorkspace, sync, length, workSize, numGroups, numRun);
     if (err)
         std::cout << "launchASMAMax error : " << err << std::endl;
 
@@ -299,7 +301,7 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
     // dumpBuffer("cpuOutD", cpuOutD);
 
     std::vector<To> cpuWs(numGroups, 0.f);
-    err = hipMemcpyDtoH(cpuWs.data(), workspace, numGroups * sizeof(To));
+    err = hipMemcpyDtoH(cpuWs.data(), gpuWorkspace, numGroups * sizeof(To));
     // dumpBuffer("WS result", cpuWs, cpuWs.size());
 
     std::vector<uint32_t> cpusy(1, 0);
@@ -327,7 +329,7 @@ void AMaxScaleTest(const std::string& coPath, const std::uint32_t& length, const
 
     err = hipFree(gpuOutput);
     err = hipFree(gpuInput);
-    err = hipFree(workspace);
+    err = hipFree(gpuWorkspace);
     err = hipFree(sync);
     err = hipFree(gpuScale);
     err = hipFree(gpuOutputD);
@@ -353,9 +355,9 @@ int main(int argc, char **argv) {
     std::cout << " m " << m << " n " << n << std::endl;
 
     if (is_scale)
-        AMaxScaleTest<float, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 131072, 128);
+        AMaxScaleTest<_Float16, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 131072, 128);
     else
-        AMaxTest<float, float>("amax.co", length, 131072, 128);
+        AMaxTest<_Float16, float>("amax.co", length, 131072, 128);
 
     return 0;
 }
