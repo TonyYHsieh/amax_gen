@@ -108,9 +108,9 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
     err = hipEventCreate(&beg);
     err = hipEventCreate(&end);
 
-//    for (size_t i = 0; i < numRuns; ++i) {
-//        err = hipExtModuleLaunchKernel(func, 256 * workgroups, 1, 1, 256, 1, 1, 1000 * sizeof(float), nullptr, nullptr, launchArgs);
-//    }
+    for (size_t i = 0; i < numRuns; ++i) {
+        err = hipExtModuleLaunchKernel(func, 256 * workgroups, 1, 1, 256, 1, 1, 1000 * sizeof(float), nullptr, nullptr, launchArgs);
+    }
 
     err = hipEventRecord(beg, stream);
     for (size_t i = 0; i < numRuns; ++i) {
@@ -122,9 +122,9 @@ hipError_t launchASMAMax(hipFunction_t func, To *out, Ti* in, Ti *wk, std::uint3
 
     err = hipStreamDestroy(stream);
     
-//    float dur{};
-//    err = hipEventElapsedTime(&dur, beg, end);
-//    std::cout << "ASM kernel time: " << std::to_string(dur / numRuns * 1000) << " us\n";
+    float dur{};
+    err = hipEventElapsedTime(&dur, beg, end);
+    std::cout << "ASM kernel time: " << std::to_string(dur / numRuns * 1000) << " us\n";
     return err;
 }
 
@@ -193,9 +193,9 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
     hipDevice_t dev{};
     auto err = hipDeviceGet(&dev, 0);
 
-    std::vector<Ti> cpuWorkspace(4096, Ti(2.0f));
-    std::vector<Ti> cpuInput(length, Ti(0.5f));
-//    randomize(begin(cpuInput), end(cpuInput));
+//    std::vector<Ti> cpuWorkspace(4096, Ti(2.0f));
+    std::vector<Ti> cpuInput(length);
+    randomize(begin(cpuInput), end(cpuInput));
 
     Ti *gpuInput{};
     err = hipMalloc(&gpuInput, sizeof(Ti) * length);
@@ -207,8 +207,8 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
 
     Ti *gpuWorkspace{};
     err = hipMalloc(&gpuWorkspace, 4096);
-//    err = hipMemset(gpuWorkspace, 0, sizeof(Ti) * numGroups);
-    err = hipMemcpyHtoD(gpuWorkspace, cpuWorkspace.data(), 4096);
+    err = hipMemset(gpuWorkspace, 0, sizeof(Ti) * numGroups);
+//    err = hipMemcpyHtoD(gpuWorkspace, cpuWorkspace.data(), 4096);
 
     std::uint32_t *sync{};
     err = hipMalloc(&sync, sizeof(std::uint32_t));
@@ -216,7 +216,7 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
 
     hipModule_t module{};
     hipFunction_t func{};
-    int numRun = 1;  //(1000000.0f * 16 * 1024 / float(length));
+    int numRun = (1000000.0f * 16 * 1024 / float(length));
     std::cout << "numRun " << numRun << std::endl;
 
     err = prepareASMKernel("AMax", coPath, &module, &func);
@@ -355,16 +355,16 @@ int main(int argc, char **argv) {
     const std::uint32_t m(std::atoi(argv[1]));
     const std::uint32_t n(std::atoi(argv[2]));
     const std::uint32_t is_scale(std::atoi(argv[3]));
-
+    const std::uint32_t worksize = 32768;
     const std::uint32_t length = m * n;
 
 
     std::cout << " m " << m << " n " << n << std::endl;
 
     if (is_scale)
-        AMaxScaleTest<_Float16, float, hipblaslt_f8_fnuz>("amax-scale.co", length, 131072, 128);
+        AMaxScaleTest<_Float16, float, hipblaslt_f8_fnuz>("amax-scale.co", length, worksize, 128);
     else
-        AMaxTest<_Float16, float>("amax.co", length, 131072, 128);
+        AMaxTest<_Float16, float>("amax.co", length, worksize, 128);
 
     return 0;
 }
