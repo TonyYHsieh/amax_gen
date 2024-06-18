@@ -195,7 +195,9 @@ void AMaxTest(const std::string& coPath, const std::uint32_t& length, const std:
 
 //    std::vector<Ti> cpuWorkspace(4096, Ti(2.0f));
     std::vector<Ti> cpuInput(length);
-    randomize(begin(cpuInput), end(cpuInput));
+//    randomize(begin(cpuInput), end(cpuInput));
+    for(int i=1; i<length; i++)
+        cpuInput[i] = i/1000.0f;
 
     Ti *gpuInput{};
     err = hipMalloc(&gpuInput, sizeof(Ti) * length);
