@@ -963,8 +963,6 @@ class AMaxKernelGenerator:
         mod = ti.Module("output_result")
         mod.addComment0("output_result")
 
-        label_break = ti.Label("break", 'break')
-        label_break2 = ti.Label("break2", 'break2')
         label_end = ti.Label("end", 'end')
         label_final_loop = ti.Label("final_loop", 'final_loop')
         label_final_output = ti.Label("final_output", 'final_output')
@@ -1019,8 +1017,6 @@ class AMaxKernelGenerator:
             mod.add(BufferLoadx1(ti.vgpr(f"Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True, glc=True, slc=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.addSpaceLine()
-
-            mod.add(label_break)
 
             mod.add(self.max_per_data(0, 1))
             mod.addSpaceLine()
