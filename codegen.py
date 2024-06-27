@@ -518,23 +518,43 @@ class AMaxKernelGenerator:
         mod.addComment0("sum_per_blocksize")
 
         label_sum_per_blocksize = ti.Label("sum_per_blocksize", 'sum_per_blocksize')
+        label_tail_adj_WS_end = ti.Label("tail_adj_WS_end", 'tail_adj_WS_end')
         label_loop = ti.Label("loop", 'loop')
         label_last_loop = ti.Label("last_loop", 'last_loop')
-        label_loop_end = ti.Label("loop_end", 'loop_end')
         label_sum_per_blocksize_end = ti.Label("sum_per_blocksize_end", 'sum_per_blocksize_end')
 
+        mod.add(ti.SMovB32(ti.sgpr("Tmp+2"), 0))
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), ti.sgpr("LogWorkSize"), ti.sgpr("SizeLength")))
         mod.add(label_sum_per_blocksize)
-        mod.add(ti.SCmpGeI32(ti.sgpr("WGIdx"), ti.sgpr("MainLoop")))
+        mod.add(ti.SCmpGtI32(ti.sgpr("WGIdx"), ti.sgpr("MainLoop")))
         mod.add(ti.SCBranchSCC1(label_sum_per_blocksize_end.getLabelName()))
         mod.addSpaceLine()
+        mod.add(ti.SCmpEQI32(ti.sgpr("WGIdx"), ti.sgpr("MainLoop")))
+        mod.add(ti.SCBranchSCC0(label_tail_adj_WS_end.getLabelName()))
+        mod.addSpaceLine()
 
+        # WGIdx == MainLoop, last one, might have a tail block or nothing left
+        mod.addComment0("Last WG, check if this might be a tail block")
+        mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), ti.sgpr("LogWorkSize"), ti.sgpr("MainLoop"), "temp = non-tail elems = loop time * worksize"))
+        mod.add(ti.SCmpEQI32(ti.sgpr("Tmp"), ti.sgpr("SizeLength"), "if non-tail-elem == full-size --> no tail block, jump to reduction"))
+        mod.add(ti.SCBranchSCC1(self.label_reduction.getLabelName()))
+        mod.addSpaceLine()
+
+        # adjust worksize to multiple of (self.num_load_count * self.num_workitems * self.num_load_size)
+        mod.addComment0("it is a tail block, adjust the worksize")
+        mod.add(ti.SSubU32(ti.sgpr("Tmp"), ti.sgpr("SizeLength"), ti.sgpr("Tmp"), "temp = tail elems"))
+        mod.add(ti.SAndB32(ti.sgpr("Tmp+2"), int(self.num_load_size-1), ti.sgpr("Tmp"), "(pre-save for later use) tail modulo load_size"))
+        mod.add(ti.SSubU32(ti.sgpr("Tmp"), ti.sgpr("Tmp"), 1, "tail - 1"))
+        block_size = self.num_load_count * self.num_workitems * self.num_load_size
+        mod.add(ti.SLShiftRightB32(ti.sgpr("Tmp"), int(log2(block_size)), ti.sgpr("Tmp"), "quation of (tail-1) / blocksize"))
+        mod.add(ti.SAddU32(ti.sgpr("Tmp"), ti.sgpr("Tmp"), 1, "quation + 1"))
+        mod.add(ti.SLShiftLeftB32(ti.sgpr("WorkSize"), int(log2(block_size)), ti.sgpr("Tmp"), "adj WS = (quation + 1) * blocksize = aligned with blocksize"))
+        mod.addSpaceLine()
+
+        mod.add(label_tail_adj_WS_end)
         if self.is_scale:
             mod.add(ti.SMovB32(ti.sgpr("OffsetD"), 0))
         mod.add(ti.SMovB32(ti.sgpr("Offset"), 0))
-        mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), 1, ti.sgpr("WorkSize")))
-        mod.add(ti.SCmpGeI32(ti.sgpr("Offset"), ti.sgpr("Tmp")))
-        mod.add(ti.SCBranchSCC1(label_loop_end.getLabelName()))
         mod.addSpaceLine()
 
         buffer_load = self.global_read_inst_type(self.num_load_size, self.i_type)
@@ -568,9 +588,6 @@ class AMaxKernelGenerator:
         mod.addSpaceLine()
 
         mod.add(self.block_max(self.num_load_count-1, True))
-        mod.addSpaceLine()
-
-        mod.add(label_loop_end)
         mod.addSpaceLine()
 
         mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), int(log2(self.bpe)), ti.sgpr("WorkSize")))
@@ -769,6 +786,40 @@ class AMaxKernelGenerator:
         mod.addSpaceLine()
         return mod
 
+    def sum_odd_size_tail(self) -> ti.Module:
+        mod = ti.Module("sum_odd_size_tail")
+        mod.addComment0("sum_odd_size_tail")
+
+        mod.add(ti.SCmpEQI32(ti.sgpr("Tmp+2"), 0, "if not zero, need to do odd-size-tail"))
+        mod.add(ti.SCBranchSCC1(self.label_reduction.getLabelName()))
+        mod.addSpaceLine()
+
+        mod.addComment0("src points to the last addr aligned with load_size, and let each thread load one elem")
+        mod.add(ti.SSubU32(ti.sgpr("Tmp"), ti.sgpr("SizeLength"), ti.sgpr("Tmp+2"), "(size-len - remainer) = part that is multiple of load_size"))
+        mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), int(log2(self.bpe)), ti.sgpr("Tmp"), "* bpe"))
+        mod.addSpaceLine()
+
+        mod.add(ti.SAddU32(ti.sgpr("Src+0"), ti.sgpr("AddressIn+0"), ti.sgpr("Tmp")))
+        mod.add(ti.SAddCU32(ti.sgpr("Src+1"), ti.sgpr("AddressIn+1"), 0))
+        mod.add(ti.SLShiftLeftB32(ti.sgpr("Src+2"), int(log2(self.bpe)), ti.sgpr("Tmp+2"), "numRecords = only the remainers"))
+        mod.add(ti.SMovB32(ti.sgpr("Src+3"), "Srd127_96"))
+        mod.addSpaceLine()
+
+        BufferLoadx1 = self.global_read_inst_type(1, self.i_type)
+        mod.add(ti.VAndB32(ti.vgpr("Offset"), self.num_load_size - 1, ti.vgpr("Serial"), "modulo load_size, vOffset = 0 ~ load_size-1"))
+        mod.add(ti.VLShiftLeftB32(ti.vgpr("Offset"), int(log2(self.bpe)), ti.vgpr("Offset")))
+        mod.add(BufferLoadx1(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.SWaitCnt(vmcnt=0))
+        mod.addSpaceLine()
+        mod.add(self.max_per_data(0, 1))
+        # TODO- verify
+        # if self.is_scale:
+        #     mod.add(self.scale_per_data(0))
+        #     mod.add(ti.BufferStoreB8(ti.vgpr("OutputD"),
+        #                              ti.vgpr("OffsetD"), ti.sgpr("DstD",4), 0, ti.MUBUFModifiers(offen=True)))
+        #     mod.addSpaceLine()
+
+        return mod
 
     def adjust_global_address_2(self) -> ti.Module:
         mod = ti.Module("adjust_global_address_2")
@@ -1088,12 +1139,13 @@ class AMaxKernelGenerator:
             mod.add(self.init_param())
             mod.add(self.calculate_global_address())
             mod.add(self.sum_per_blocksize())
-            mod.add(self.adjust_global_address())
-            mod.add(self.sum_per_threadx4x4())
-            mod.add(self.sum_per_threadx4())
-            mod.add(self.adjust_global_address_2())
-            mod.add(self.sum_per_thread())
-            mod.add(self.sum_in_some_thread())
+            mod.add(self.sum_odd_size_tail())
+            # mod.add(self.adjust_global_address())
+            # mod.add(self.sum_per_threadx4x4())
+            # mod.add(self.sum_per_threadx4())
+            # mod.add(self.adjust_global_address_2())
+            # mod.add(self.sum_per_thread())
+            # mod.add(self.sum_in_some_thread())
             mod.add(self.label_reduction)
             mod.add(self.intra_wave_reduction("middle"))
             mod.add(self.inter_wave_reduction())
@@ -1221,4 +1273,3 @@ if __name__ == '__main__':
     ret = subprocess.run([toolchain_path] + build_args)
     ret = subprocess.run([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
     amax.dump('yaml', f'{output_path_basename}.yaml')
-
